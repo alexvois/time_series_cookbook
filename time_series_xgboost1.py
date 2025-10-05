@@ -120,7 +120,7 @@ model.fit(
 )
 
 # Predictions (predict delta and add back last value)
-print("Making predictions...")
+print("Making predictions (sliding window, 1-step ahead)...")
 predicted_train_delta = model.predict(X_train)
 predicted_test_delta = model.predict(X_test)
 predicted_train = X_train[:, -1] + predicted_train_delta

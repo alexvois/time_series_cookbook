@@ -12,19 +12,17 @@ import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 import yfinance as yf
 
 # Load Stock Market Data from Yahoo Finance
 def load_stock_data():
     return yf.download('AAPL', start='2010-01-01', end='2022-02-26')
 
-def get_data():
+def get_raw_series():
     df = load_stock_data()
-    #df = pd.read_csv("data/stocks/BPCL.csv")
-    #df = pd.read_csv("data/stocks/ITC.csv")
     time_series = df['Close'].values  # Use Close price as time series
-    scaler = MinMaxScaler()
-    return scaler.fit_transform(time_series.reshape(-1, 1)).flatten()
+    return time_series
 
 # Function to create sequences
 def create_sequences(data, seq_length):
@@ -38,13 +36,24 @@ def create_sequences(data, seq_length):
     return np.array(xs), np.array(ys)
 
 seq_length = 50
-data = get_data()
+# Load raw series
+data_raw = get_raw_series()
+
+# Set train length (in number of sequences)
+train_length = 2800
+
+# Fit scaler on TRAIN RANGE ONLY (include initial seq_length context used in training windows)
+values_for_scaler = data_raw[:train_length + seq_length]
+_scaler = MinMaxScaler().fit(values_for_scaler.reshape(-1, 1))
+# Scale entire series using train-fitted scaler
+data = _scaler.transform(data_raw.reshape(-1, 1)).flatten()
+
+# Create sequences on scaled data
 X, y = create_sequences(data, seq_length)
 print()
 print(f"created {len(X)} samples")
 
 # Convert data to PyTorch tensors
-train_length = 2800
 X_train, y_train = torch.tensor(X[:train_length, :, None], dtype=torch.float32), torch.tensor(y[:train_length, None], dtype=torch.float32)
 X_test, y_test = torch.tensor(X[train_length:, :, None], dtype=torch.float32), torch.tensor(y[train_length:, None], dtype=torch.float32)
 print(f"train samples: {len(X_train)}")
@@ -109,6 +118,7 @@ for epoch in range(num_epochs):
         print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
 
 # Predicted outputs
+print("Making predictions (sliding window, 1-step ahead)...")
 model.eval()
 
 h0 = torch.zeros(model.layer_dim, X_train.size(0), model.hidden_dim).to(device)
@@ -122,6 +132,22 @@ c0 = torch.zeros(model.layer_dim, X_test.size(0), model.hidden_dim).to(device)
 predicted_test, _, _ = model(X_test, h0, c0)
 original_test = data[train_length+seq_length:train_length+seq_length+len(X_test)]
 time_steps_test = np.arange(train_length + seq_length, train_length + seq_length + len(X_test))  # Corresponding time steps
+
+# Metrics (on scaled values)
+y_train_np = y_train.detach().cpu().numpy().flatten()
+y_test_np = y_test.detach().cpu().numpy().flatten()
+predicted_train_np = predicted_train.detach().cpu().numpy().flatten()
+predicted_test_np = predicted_test.detach().cpu().numpy().flatten()
+
+train_mse = mean_squared_error(y_train_np, predicted_train_np)
+train_mae = mean_absolute_error(y_train_np, predicted_train_np)
+test_mse = mean_squared_error(y_test_np, predicted_test_np)
+test_mae = mean_absolute_error(y_test_np, predicted_test_np)
+
+print(f"Train MSE: {train_mse:.6f}")
+print(f"Train MAE: {train_mae:.6f}")
+print(f"Test MSE: {test_mse:.6f}")
+print(f"Test MAE: {test_mae:.6f}")
 
 # Plotting
 plt.figure(figsize=(12, 6))
